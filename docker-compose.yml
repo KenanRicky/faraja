@@ -46,7 +46,7 @@ services:
     environment:
       API_INTERNAL_URL: http://backend:8000
     ports:
-      - "${FRONTEND_PORT}:3000"
+      - "${FRONTEND_PORT}:3001"
     networks:
       - faraja-net
     depends_on:
