@@ -1,7 +1,11 @@
 import { CreateProjectPayload, Project } from "@/lib/types";
 
+// Server-side rendering runs inside the container network, where the backend is
+// reached by service name (API_INTERNAL_URL); the browser uses the public URL.
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+  (typeof window === "undefined" ? process.env.API_INTERNAL_URL : undefined) ??
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  "http://127.0.0.1:8000";
 
 export async function listProjects(): Promise<Project[]> {
   try {
