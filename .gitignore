@@ -16,3 +16,9 @@ backend/.mypy_cache
 # OS / editor
 .DS_Store
 .vscode/*.log
+
+# Local tooling / installers (never commit)
+aws/
+awscliv2.zip
+*.zip
+.env.test
