@@ -1,12 +1,14 @@
 FROM postgres:16-alpine
+LABEL maintainer="KenanRicky <kaburaricky@gmail.com>"
 
-# Environment variables for default database creation
-ENV POSTGRES_DB=appdb
-ENV POSTGRES_USER=postgres
-ENV POSTGRES_PASSWORD=secret
+# The password is NOT set here. It comes from the .env file at runtime.
+ENV POSTGRES_DB=faraja POSTGRES_USER=postgres
 
-# Copy any initialization scripts or SQL dumps into the entrypoint folder.
-# Any .sql or .sh files placed here will run automatically on the first container startup.
+# Runs once, the first time the database starts
 COPY init.sql /docker-entrypoint-initdb.d/
 
+# gosu is only needed when starting as root; we start as postgres, so remove it
+# (it was flagged CRITICAL by Trivy: CVE-2025-68121)
+RUN rm -f /usr/local/bin/gosu
+USER postgres
 EXPOSE 5432
