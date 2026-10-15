@@ -1,0 +1,18 @@
+# ClusterIP Service: the stable name the backend connects to.
+# The name MUST exactly match DB_HOST in the ConfigMap (and the host
+# inside DATABASE_URL in the Secret).
+apiVersion: v1
+kind: Service
+metadata:
+  name: database
+  namespace: faraja
+  labels:
+    app: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
