@@ -8,5 +8,5 @@ spec:
   selector:
     app: database
   ports:
-    - port: 80
+    - port: 5432
       targetPort: 5432

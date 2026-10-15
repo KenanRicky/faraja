@@ -2,10 +2,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: database
+  namespace: faraja
   labels:
     app: database
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: database
@@ -15,7 +16,14 @@ spec:
         app: database
     spec:
       containers:
-      - name: database
-        image: kenanricky/faraja-database:v1.1.0
-        ports:
-        - containerPort: 5432
+        - name: database
+          image: kenanricky/faraja-database:v1.1.0
+          ports:
+            - containerPort: 5432
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
