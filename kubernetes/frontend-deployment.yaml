@@ -3,10 +3,8 @@ kind: Deployment
 metadata:
   name: frontend
   namespace: faraja
-  labels:
-    app: frontend
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: frontend
@@ -20,6 +18,9 @@ spec:
           image: kenanricky/faraja-frontend:v1.1.0
           ports:
             - containerPort: 3000
+          env:
+            - name: API_INTERNAL_URL   # how the frontend reaches the backend
+              value: http://backend-service
           resources:
             requests:
               cpu: 100m
@@ -27,3 +28,8 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            periodSeconds: 10

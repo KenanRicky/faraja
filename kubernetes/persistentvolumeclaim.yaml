@@ -3,8 +3,6 @@ kind: PersistentVolumeClaim
 metadata:
   name: faraja-pvc
   namespace: faraja
-  labels:
-    app: postgres
 spec:
   accessModes:
     - ReadWriteOnce

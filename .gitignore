@@ -22,3 +22,6 @@ aws/
 awscliv2.zip
 *.zip
 .env.test
+
+# Kubernetes secrets with real values
+kubernetes/secret.yaml

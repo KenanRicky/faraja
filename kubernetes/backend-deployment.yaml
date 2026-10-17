@@ -3,8 +3,6 @@ kind: Deployment
 metadata:
   name: backend
   namespace: faraja
-  labels:
-    app: backend
 spec:
   replicas: 1
   selector:
@@ -20,6 +18,12 @@ spec:
           image: kenanricky/faraja-backend:v1.1.0
           ports:
             - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: faraja-secret
+                  key: DATABASE_URL
           resources:
             requests:
               cpu: 100m
@@ -27,21 +31,8 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
-          env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: faraja-secret
-                  key: DATABASE_URL
           readinessProbe:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 5
             periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 15
-            periodSeconds: 20
