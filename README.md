@@ -587,20 +587,10 @@ Afterwards, check in the AWS console (eu-west-1) that no EC2 instances, EBS volu
 
 ## 14. Use of AI tools
 
-**Claude Code** (Anthropic), used inside VS Code, assisted with this project. It was used to:
-
-- diagnose the missing `init.sql` build error and write the schema to match the existing SQLModel models;
-- review the Dockerfiles against the best-practice checklist and rewrite them as simple multi-stage, non-root builds;
-- write `docker-compose.yml` with health checks, a named network, a volume and `depends_on` conditions;
-- run Trivy scans and choose fixes for the CRITICAL CVEs (base image changes, the Next.js upgrade, removing `gosu`);
-- review and simplify the Kubernetes manifests, fixing wrong ports, selectors, names and indentation;
-- diagnose EKS problems: the t3.micro pod limit, the missing EBS CSI driver and the missing Secret;
-- draft this README.
-
-Every change was run and checked: Compose clean-start tests, Trivy rescans, and `kubectl` deployment and end-to-end tests on EKS. AWS changes that create IAM roles or cost money were reviewed and run by me.
+AI tools were used during this project to help **debug** problems with the Docker, Docker Compose and Kubernetes setup, and to help write **clear documentation**. All changes were tested and checked before being committed.
 
 ---
 
 ## 15. Author
 
-**Kenan Ricky** · GitHub: [@KenanRicky](https://github.com/KenanRicky)
+**Ricky Kenan Abura** · GitHub: [@KenanRicky](https://github.com/KenanRicky)
