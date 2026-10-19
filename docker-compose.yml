@@ -12,11 +12,10 @@ services:
     networks:
       - faraja-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ > /dev/null || exit 1"]
       interval: 10s
       retries: 5
-      start_period: 60s
-
+      start_period: 30s
   backend:
     build: ./backend
     image: kenanricky/faraja-backend:v1.1.0
@@ -46,7 +45,7 @@ services:
     environment:
       API_INTERNAL_URL: http://backend:8000
     ports:
-      - "${FRONTEND_PORT}:3001"
+      - "${FRONTEND_PORT}:3000"
     networks:
       - faraja-net
     depends_on:
