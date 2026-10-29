@@ -39,7 +39,7 @@ flowchart LR
         vol[["Persistent volume<br/>(Docker volume / EBS disk)"]]
     end
 
-    user -- "HTTP :3001 (Compose)<br/>HTTP :30090 (NodePort)" --> fe
+    user -- "HTTP :3001 (Compose)<br/>HTTP :80 (AWS LoadBalancer)" --> fe
     user -. "API calls from the browser :8000" .-> be
     fe -- "server-side requests<br/>http://backend:8000 / http://backend-service" --> be
     be -- "SQL<br/>database:5432" --> db
@@ -59,7 +59,7 @@ How a request flows:
 
 | Service | Image | Container port | Exposed as | Role |
 |---|---|---|---|---|
-| Frontend | `kenanricky/faraja-frontend:v1.1.0` | 3000 | Compose `localhost:3001`; Kubernetes NodePort `30090` | Next.js dashboard: list projects, budget totals, create-project form |
+| Frontend | `kenanricky/faraja-frontend:v1.1.0` | 3000 | Compose `localhost:3001`; Kubernetes LoadBalancer (AWS ELB, port 80) | Next.js dashboard: list projects, budget totals, create-project form |
 | Backend | `kenanricky/faraja-backend:v1.1.0` | 8000 | Compose `localhost:8000`; Kubernetes ClusterIP `backend-service:80` | FastAPI REST API: `/projects`, `/milestones`, `/health`, docs at `/docs` |
 | Database (Compose) | `kenanricky/faraja-database:v1.1.0` | 5432 | Internal only | PostgreSQL 16 with the Faraja schema preloaded |
 | Database (Kubernetes) | `postgres:15-alpine` + `init.sql` ConfigMap | 5432 | ClusterIP `database:5432` | PostgreSQL run as a StatefulSet on an EBS volume |
@@ -354,13 +354,13 @@ docker manifest inspect kenanricky/faraja-backend:v1.1.0 > /dev/null && echo "fo
 | `backend-deployment.yaml` | Deployment `backend` | 1 replica; gets `DATABASE_URL` from the Secret; readiness check on `/health` |
 | `backend-service.yaml` | Service `backend-service` (ClusterIP) | port 80 → container port 8000, internal only |
 | `frontend-deployment.yaml` | Deployment `frontend` | 2 replicas; `API_INTERNAL_URL=http://backend-service`; readiness check on `/` |
-| `frontend-service.yaml` | Service `frontend-service` (NodePort) | port 80 → container port 3000, open on every node at **30090** |
+| `frontend-service.yaml` | Service `frontend-service` (LoadBalancer) | port 80 → container port 3000; AWS creates a public load balancer for it |
 
 Design choices:
 
 - **The database is a StatefulSet, not a Deployment.** A database needs one stable pod with its own disk. Two PostgreSQL replicas without replication would be two separate databases.
 - **The backend and database use ClusterIP.** They are reachable only from inside the cluster.
-- **The frontend uses NodePort 30090.** This exposes the dashboard outside the cluster.
+- **The frontend uses a LoadBalancer Service.** AWS creates a public load balancer with a stable hostname, so the dashboard is reachable without opening node ports or knowing node IPs.
 - **Every container has resource requests and limits.** This lets the scheduler place pods correctly and stops one pod from starving the others.
 - **Readiness probes** stop traffic from reaching a pod until it can actually serve requests.
 - **`PGDATA` points to a subfolder** (`/var/lib/postgresql/data/pgdata`). A new EBS disk contains a `lost+found` folder, and PostgreSQL refuses to initialise into a directory that isn't empty.
@@ -470,7 +470,7 @@ pod/frontend-yyyyy           1/1  Running
 
 service/database           ClusterIP  5432/TCP
 service/backend-service    ClusterIP  80/TCP
-service/frontend-service   NodePort   80:30090/TCP
+service/frontend-service   LoadBalancer   <xxxx>.eu-west-1.elb.amazonaws.com   80:3xxxx/TCP
 
 persistentvolumeclaim/faraja-pvc   Bound   1Gi   gp2
 ```
@@ -502,11 +502,16 @@ This was tested on EKS: the POST returned `201` and the project appeared on the 
 ### Open the dashboard in a browser
 
 ```bash
-kubectl get nodes -o wide       # note a node's EXTERNAL-IP
+kubectl get svc frontend-service -n faraja    # copy the EXTERNAL-IP (an ELB hostname)
 ```
 
-1. In the AWS console, go to **EC2 → Security Groups**, select the node group's security group, and add an inbound rule: **TCP 30090** from your IP.
-2. Open `http://<node-external-ip>:30090`.
+Open `http://<EXTERNAL-IP>` in a browser. The load balancer takes 2–3 minutes to be created and for its DNS name to start resolving; until then `EXTERNAL-IP` shows `<pending>` or the page doesn't load yet.
+
+For a quick check without the load balancer, you can also port-forward:
+
+```bash
+kubectl port-forward -n faraja svc/frontend-service 8080:80   # then open http://localhost:8080
+```
 
 ### See the resources in the AWS console
 
@@ -547,7 +552,7 @@ kubectl delete namespace faraja                  # remove everything left in the
 eksctl delete cluster --name faraja --region eu-west-1
 ```
 
-Afterwards, check in the AWS console (eu-west-1) that no EC2 instances, EBS volumes or load balancers are left behind.
+Afterwards, check in the AWS console (eu-west-1) that no EC2 instances, EBS volumes or load balancers are left behind. Delete the `faraja` namespace (or `frontend-service`) **before** deleting the cluster, so Kubernetes removes the load balancer it created.
 
 ---
 
@@ -569,6 +574,7 @@ Afterwards, check in the AWS console (eu-west-1) that no EC2 instances, EBS volu
 | 12 | Backend `CrashLoopBackOff` | The backend had no `DATABASE_URL`, so it tried `localhost:5432` | Deployment reads `DATABASE_URL` from the Secret |
 | 13 | `kubectl apply` refused the StatefulSet: "updates to statefulset spec … are forbidden" | `serviceName` cannot be changed on an existing StatefulSet | Deleted and recreated the StatefulSet; the data is safe on the separate PVC |
 | 14 | Risk: `kubectl apply -f kubernetes/` would overwrite the real Secret with the template password | The template was named `secret.example.yaml` | Renamed it to `secret.yaml.example` so `kubectl` skips it |
+| 15 | The dashboard couldn't be opened in a browser from outside the cluster | The frontend Service was a `NodePort` (30090). EKS node security groups block that port by default, and the URL depended on a worker node's public IP, which changes when nodes are replaced | Changed `frontend-service` to `type: LoadBalancer`. AWS now creates a public load balancer on port 80 with a stable hostname (`kubectl get svc -n faraja`), with no security-group edits needed |
 
 ---
 
@@ -580,7 +586,7 @@ Afterwards, check in the AWS console (eu-west-1) that no EC2 instances, EBS volu
   - Prometheus and Grafana monitoring
   - Bash scripts to automate deployments and cluster health checks
   - Liveness probes
-  - An Ingress or LoadBalancer instead of NodePort
+  - An Ingress (AWS Load Balancer Controller) with HTTPS and a custom domain
   - Authentication and role-based access
 
 ---

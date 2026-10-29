@@ -1,7 +1,7 @@
 FROM postgres:16-alpine
 LABEL maintainer="KenanRicky <kaburaricky@gmail.com>"
 
-# The password is NOT set here. It comes from the .env file at runtime.
+
 ENV POSTGRES_DB=faraja POSTGRES_USER=postgres
 
 # Runs once, the first time the database starts

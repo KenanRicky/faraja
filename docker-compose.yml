@@ -12,9 +12,10 @@ services:
     networks:
       - faraja-net
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ > /dev/null || exit 1"]
-      interval: 10s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -h localhost -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
       start_period: 30s
   backend:
     build: ./backend
@@ -52,11 +53,10 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-     test: ["CMD-SHELL", "pg_isready -h localhost -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-     interval: 5s
-     timeout: 5s
-     retries: 10
-     start_period: 30s
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ > /dev/null || exit 1"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
 
 networks:
   faraja-net:
