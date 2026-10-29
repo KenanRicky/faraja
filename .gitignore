@@ -25,3 +25,5 @@ awscliv2.zip
 
 # Kubernetes secrets with real values
 kubernetes/secret.yaml
+
+secret.yaml.example
