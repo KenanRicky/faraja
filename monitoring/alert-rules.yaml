@@ -1,0 +1,34 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: faraja-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: faraja.rules
+      rules:
+        - alert: FarajaApiDown
+          expr: up{job="backend-service"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: Faraja API is down
+
+        - alert: FarajaLowReplicaCount
+          expr: kube_deployment_status_replicas_available{namespace="faraja", deployment="backend"} < 2
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: Fewer replicas than expected are running
+
+        - alert: FarajaHighErrorRate
+          expr: sum(rate(http_requests_total{status_code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Error rate is above acceptable threshold

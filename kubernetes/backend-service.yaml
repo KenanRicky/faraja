@@ -3,10 +3,13 @@ kind: Service
 metadata:
   name: backend-service
   namespace: faraja
+  labels:
+    app: backend          # matched by the ServiceMonitor
 spec:
   type: ClusterIP
   selector:
     app: backend
   ports:
-    - port: 80
+    - name: http          # referenced by the ServiceMonitor
+      port: 80
       targetPort: 8000

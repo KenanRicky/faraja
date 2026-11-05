@@ -4,7 +4,7 @@ metadata:
   name: backend
   namespace: faraja
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: backend
@@ -12,12 +12,17 @@ spec:
     metadata:
       labels:
         app: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8000"
     spec:
       containers:
         - name: backend
-          image: kenanricky/faraja-backend:v1.1.0
+          image: kenanricky/faraja-backend:v1.2.1
           ports:
-            - containerPort: 8000
+            - name: http
+              containerPort: 8000
           env:
             - name: DATABASE_URL
               valueFrom:
