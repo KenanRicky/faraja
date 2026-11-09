@@ -29,7 +29,7 @@ kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80
 
 - Prometheus: http://localhost:9090 (Status → Targets, Alerts)
 - Grafana: http://localhost:3000, user `admin`
-- Dashboard: Dashboards → New → Import → upload `dashboards/faraja-overview.json`
+- Dashboard: loaded automatically from `dashboard-configmap.yaml` (Dashboards → Faraja - Project Tracker Overview)
 
 ## Metrics
 
