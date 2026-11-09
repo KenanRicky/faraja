@@ -16,3 +16,7 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # ServiceMonitor/PrometheusRule types come from kube-prometheus-stack; wait for them
+      - SkipDryRunOnMissingResource=true

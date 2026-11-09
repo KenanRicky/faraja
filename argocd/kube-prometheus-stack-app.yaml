@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 92.16.1
+    helm:
+      releaseName: monitoring        # keeps names like monitoring-grafana
+      valuesObject:
+        prometheus:
+          prometheusSpec:
+            # pick up every ServiceMonitor / PrometheusRule, not just the chart's own
+            serviceMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+        grafana:
+          admin:
+            existingSecret: grafana-admin   # created by hand, not in git
+        # EKS hides these control-plane parts, so scraping them only raises false alerts
+        kubeEtcd:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeControllerManager:
+          enabled: false
+        kubeProxy:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true         # the chart's CRDs are too big for a normal apply
