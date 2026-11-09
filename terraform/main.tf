@@ -10,10 +10,13 @@ terraform {
 }
 
 provider "aws" {
-  region = "eu-west-1"
+  region = "us-east-1"
 }
 
-data "aws_availability_zones" "available" {}
+# use1-az3 can't host EKS control planes, so never pick it
+data "aws_availability_zones" "available" {
+  exclude_zone_ids = ["use1-az3"]
+}
 
 # Public subnets only: nodes get public IPs, so no NAT gateway is needed (saves cost)
 module "vpc" {
@@ -64,5 +67,5 @@ module "eks" {
 }
 
 output "configure_kubectl" {
-  value = "aws eks update-kubeconfig --region eu-west-1 --name ${module.eks.cluster_name}"
+  value = "aws eks update-kubeconfig --region us-east-1 --name ${module.eks.cluster_name}"
 }
