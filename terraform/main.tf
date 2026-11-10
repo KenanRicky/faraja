@@ -47,7 +47,7 @@ module "eks" {
     general = {
       min_size       = 1
       max_size       = 3
-      desired_size   = 2
+      desired_size   = var.desired_node_count
       instance_types = ["t3.medium"]
 
       # The driver uses the node role to create and attach disks

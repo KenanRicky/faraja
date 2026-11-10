@@ -1,0 +1,6 @@
+# Provider plugins and local state (state can hold secrets)
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
