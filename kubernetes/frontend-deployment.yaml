@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: kenanricky/faraja-frontend:v1.3.0
+          image: kenanricky/faraja-frontend:v1.1.0
           ports:
             - containerPort: 3000
           env:

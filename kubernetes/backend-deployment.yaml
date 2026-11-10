@@ -29,11 +29,6 @@ spec:
                 secretKeyRef:
                   name: faraja-secret
                   key: DATABASE_URL
-            - name: FRONTEND_ORIGIN
-              valueFrom:
-                configMapKeyRef:
-                  name: faraja-config
-                  key: FRONTEND_ORIGIN
           resources:
             requests:
               cpu: 100m

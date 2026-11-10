@@ -5,5 +5,3 @@ metadata:
   namespace: faraja
 data:
   POSTGRES_DB: faraja
-  # Browser origin allowed to call the API (CORS): the frontend-service load balancer
-  FRONTEND_ORIGIN: http://aa569c7cae32f4620975dd7f331d5b97-206587080.us-east-1.elb.amazonaws.com
