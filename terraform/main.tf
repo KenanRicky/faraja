@@ -38,12 +38,22 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
+  # Installs the driver that creates EBS disks for PVCs (the Postgres volume)
+  cluster_addons = {
+    aws-ebs-csi-driver = { most_recent = true }
+  }
+
   eks_managed_node_groups = {
     general = {
-      min_size     = 1
-      max_size     = 3
-      desired_size = 2
+      min_size       = 1
+      max_size       = 3
+      desired_size   = 2
       instance_types = ["t3.medium"]
+
+      # The driver uses the node role to create and attach disks
+      iam_role_additional_policies = {
+        ebs = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+      }
     }
   }
 }
