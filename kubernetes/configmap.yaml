@@ -5,3 +5,6 @@ metadata:
   namespace: faraja
 data:
   POSTGRES_DB: faraja
+  # Browser origin allowed to call the API (CORS): the frontend-service load balancer.
+  # Replace after each new cluster: kubectl get svc frontend-service -n faraja
+  FRONTEND_ORIGIN: http://REPLACE-WITH-FRONTEND-LB-HOSTNAME

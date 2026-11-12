@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: kenanricky/faraja-frontend:v1.1.0
+          # v1.3.0 has the OLD backend LB baked in; rebuild with the new one, then bump this tag
+          image: kenanricky/faraja-frontend:v1.3.0
           ports:
             - containerPort: 3000
           env:
