@@ -2,7 +2,7 @@
 
 Faraja (Swahili for *comfort/relief*) is a three-tier web application for tracking how government projects are delivered. For each project it records the budget allocated and spent, the county and constituency, the implementing agency, the responsible politician, and the project's status. Milestones track progress over time.
 
-The application is containerised with Docker, runs locally with Docker Compose, and is deployed to Kubernetes on **Amazon EKS**.
+The application is containerised with Docker, runs locally with Docker Compose, and is deployed to Kubernetes on **Amazon EKS**. **Terraform** builds the AWS network and cluster, **Argo CD** deploys the app from this repository (GitOps), and **Prometheus and Grafana** monitor it.
 
 ---
 
@@ -17,7 +17,7 @@ The application is containerised with Docker, runs locally with Docker Compose, 
 7. [Image vulnerability scanning](#7-image-vulnerability-scanning)
 8. [Push images to Docker Hub](#8-push-images-to-docker-hub)
 9. [Deploy to Kubernetes on AWS EKS](#9-deploy-to-kubernetes-on-aws-eks)
-10. [Verify the Kubernetes deployment](#10-verify-the-kubernetes-deployment)
+10. [Verify the deployment and open the tools](#10-verify-the-deployment-and-open-the-tools)
 11. [Stop and clean up](#11-stop-and-clean-up)
 12. [Problems met and how they were fixed](#12-problems-met-and-how-they-were-fixed)
 13. [Known limitations and next steps](#13-known-limitations-and-next-steps)
@@ -39,8 +39,8 @@ flowchart LR
         vol[["Persistent volume<br/>(Docker volume / EBS disk)"]]
     end
 
-    user -- "HTTP :3001 (Compose)<br/>HTTP :80 (AWS LoadBalancer)" --> fe
-    user -. "API calls from the browser :8000" .-> be
+    user -- "HTTP :3001 (Compose)<br/>HTTP :80 (frontend LoadBalancer on EKS)" --> fe
+    user -. "save a project from the browser<br/>:8000 (Compose) / backend LoadBalancer (EKS)" .-> be
     fe -- "server-side requests<br/>http://backend:8000 / http://backend-service" --> be
     be -- "SQL<br/>database:5432" --> db
     db --- vol
@@ -50,8 +50,34 @@ How a request flows:
 
 1. The user opens the dashboard in a browser.
 2. The **frontend** (Next.js) renders the page on the server. To list projects it calls the **backend** over the internal network, using the service name rather than `localhost`.
-3. The **backend** (FastAPI) reads and writes data in **PostgreSQL** through SQLModel/SQLAlchemy.
-4. PostgreSQL stores its data on a **persistent volume**, so the data survives container and pod restarts.
+3. When the user saves a new project, the **browser** calls the backend directly, at the address baked into the frontend image (`NEXT_PUBLIC_API_BASE_URL`). The backend only accepts this from the frontend's address (CORS, `FRONTEND_ORIGIN`).
+4. The **backend** (FastAPI) reads and writes data in **PostgreSQL** through SQLModel/SQLAlchemy.
+5. PostgreSQL stores its data on a **persistent volume**, so the data survives container and pod restarts.
+
+How it gets to AWS:
+
+```mermaid
+flowchart LR
+    dev([Developer laptop])
+    gh["GitHub<br/>master branch"]
+    hub["Docker Hub<br/>kenanricky/faraja-*"]
+
+    subgraph AWS["AWS us-east-1"]
+        subgraph EKS["EKS cluster: faraja-cluster"]
+            argo["Argo CD"]
+            app["namespace faraja<br/>frontend, backend, postgres"]
+            mon["namespace monitoring<br/>Prometheus, Grafana"]
+        end
+    end
+
+    dev -- "terraform apply" --> AWS
+    dev -- "git push" --> gh
+    dev -- "docker push" --> hub
+    gh -- "Argo CD pulls manifests" --> argo
+    argo --> app
+    argo --> mon
+    hub -- "image pulls" --> app
+```
 
 ---
 
@@ -59,8 +85,8 @@ How a request flows:
 
 | Service | Image | Container port | Exposed as | Role |
 |---|---|---|---|---|
-| Frontend | `kenanricky/faraja-frontend:v1.1.0` | 3000 | Compose `localhost:3001`; Kubernetes LoadBalancer (AWS ELB, port 80) | Next.js dashboard: list projects, budget totals, create-project form |
-| Backend | `kenanricky/faraja-backend:v1.1.0` | 8000 | Compose `localhost:8000`; Kubernetes ClusterIP `backend-service:80` | FastAPI REST API: `/projects`, `/milestones`, `/health`, docs at `/docs` |
+| Frontend | Compose `kenanricky/faraja-frontend:v1.1.0`; EKS `v1.4.0` | 3000 | Compose `localhost:3001`; Kubernetes LoadBalancer (AWS ELB, port 80) | Next.js dashboard: list projects, budget totals, create-project form |
+| Backend | Compose `kenanricky/faraja-backend:v1.1.0`; EKS `v1.2.1` | 8000 | Compose `localhost:8000`; Kubernetes LoadBalancer `backend-service` (AWS ELB, port 80) | FastAPI REST API: `/projects`, `/milestones`, `/health`, `/metrics`, docs at `/docs` |
 | Database (Compose) | `kenanricky/faraja-database:v1.1.0` | 5432 | Internal only | PostgreSQL 16 with the Faraja schema preloaded |
 | Database (Kubernetes) | `postgres:15-alpine` + `init.sql` ConfigMap | 5432 | ClusterIP `database:5432` | PostgreSQL run as a StatefulSet on an EBS volume |
 
@@ -98,7 +124,12 @@ faraja/
 │   ├── init.sql              schema: enum types, project and milestone tables
 │   ├── Dockerfile            postgres:16-alpine + init.sql, non-root
 │   └── .dockerignore
-├── kubernetes/               Kubernetes manifests (see section 9)
+├── kubernetes/               Kubernetes manifests, deployed by Argo CD (see section 9)
+├── terraform/                VPC, EKS cluster, node group and EBS CSI driver
+│   ├── main.tf, variables.tf, providers.tf, output.tf
+│   └── .terraform.lock.hcl   pinned provider versions
+├── argocd/                   Argo CD Applications: faraja, faraja-monitoring, kube-prometheus-stack
+├── monitoring/               ServiceMonitor, alert rules, Grafana dashboard (see monitoring/README.md)
 ├── docker-compose.yml        local three-tier stack
 ├── .env.example              template for .env (copy, then set a password)
 └── README.md
@@ -115,7 +146,7 @@ faraja/
 | Git | any recent | cloning the repository |
 | Trivy | 0.75 | vulnerability scanning (optional) |
 | kubectl | 1.37 | Kubernetes deployment |
-| eksctl | 0.231 | creating the EKS cluster |
+| Terraform | 1.5+ (1.16 used) | creating the VPC and EKS cluster |
 | AWS CLI | v2 (2.38 used) | AWS authentication |
 | An AWS account | n/a | EKS (this incurs cost, see section 9) |
 | A Docker Hub account | n/a | hosting images that the cluster pulls |
@@ -125,7 +156,7 @@ Check the tools are installed:
 ```bash
 docker --version && docker compose version
 kubectl version --client
-eksctl version
+terraform version
 aws --version
 trivy --version
 ```
@@ -336,186 +367,236 @@ Check an image exists on Docker Hub:
 docker manifest inspect kenanricky/faraja-backend:v1.1.0 > /dev/null && echo "found"
 ```
 
+The tags above are the ones used with Docker Compose. On EKS the cluster runs `faraja-backend:v1.2.1` and a frontend built with the cluster's backend address (`v1.4.0` at the time of writing); section 9.7 explains how that frontend image is built.
+
 ---
 
 ## 9. Deploy to Kubernetes on AWS EKS
 
-### 9.1 Kubernetes objects used
+The deployment has three layers:
+
+1. **Terraform** (`terraform/`) creates the AWS infrastructure: a VPC, the EKS cluster `faraja-cluster`, two t3.medium worker nodes and the EBS CSI driver.
+2. **Argo CD** runs inside the cluster and keeps it in sync with the `master` branch of this repository. Every `git push` to `kubernetes/` or `monitoring/` is deployed automatically within about 3 minutes.
+3. **Kubernetes manifests** (`kubernetes/`) describe the app itself.
+
+> **Cost:** about $0.27/hour (about $6.50/day) while the cluster runs: EKS control plane $0.10/hour, two t3.medium nodes about $0.08/hour, NAT gateway $0.045/hour plus data, and two load balancers about $0.05/hour. Tear it down when you are done (section 11).
+
+### 9.1 What Terraform builds
+
+| Resource | Details |
+|---|---|
+| VPC `faraja-vpc` | `10.0.0.0/16`, 3 private and 3 public subnets in us-east-1a/b/c |
+| NAT gateway | One, so nodes in private subnets can pull images |
+| EKS cluster `faraja-cluster` | Kubernetes 1.34, public API endpoint; whoever runs `terraform apply` becomes cluster admin |
+| Managed node group `general` | t3.medium, 2 nodes (min 1, max 3), set by `desired_node_count` |
+| EBS CSI driver | `aws-ebs-csi-driver` add-on, with `AmazonEBSCSIDriverPolicy` on the node role, so PVCs get EBS disks |
+| Subnet tags | `kubernetes.io/role/elb` on public subnets, so AWS places the public load balancers there |
+
+Terraform deliberately does **not** deploy the app. Argo CD does that, so the app is defined in one place only.
+
+### 9.2 Kubernetes objects used
 
 | File | Kind | Purpose |
 |---|---|---|
 | `namespace.yaml` | Namespace | `faraja` keeps all the app's objects together |
-| `configmap.yaml` | ConfigMap `faraja-config` | non-secret settings: `POSTGRES_DB=faraja` |
-| `secret.yaml.example` | Secret template | shows the shape of `faraja-secret`; the real one is created with `kubectl` |
+| `configmap.yaml` | ConfigMap `faraja-config` | non-secret settings: `POSTGRES_DB=faraja` and `FRONTEND_ORIGIN` (the frontend address allowed by CORS) |
+| `secret.yaml.example` | Secret template | shows the shape of `faraja-secret`; the real one is created by hand and never committed |
 | `postgres-init-configmap.yaml` | ConfigMap `postgres-init` | holds `init.sql`, mounted into the database pod |
 | `persistentvolumeclaim.yaml` | PersistentVolumeClaim `faraja-pvc` | requests a 1 Gi `gp2` EBS disk for the database |
 | `statefulset.yaml` | StatefulSet `postgres` | one PostgreSQL pod (`postgres-0`) with a stable identity and disk |
 | `postgres-service.yaml` | Service `database` (ClusterIP) | stable internal address `database:5432` |
-| `backend-deployment.yaml` | Deployment `backend` | 1 replica; gets `DATABASE_URL` from the Secret; readiness check on `/health` |
-| `backend-service.yaml` | Service `backend-service` (ClusterIP) | port 80 → container port 8000, internal only |
+| `backend-deployment.yaml` | Deployment `backend` | 2 replicas; `DATABASE_URL` from the Secret, `FRONTEND_ORIGIN` from the ConfigMap; readiness check on `/health` |
+| `backend-service.yaml` | Service `backend-service` (LoadBalancer) | port 80 → 8000; public so the browser can save projects; scraped by Prometheus |
 | `frontend-deployment.yaml` | Deployment `frontend` | 2 replicas; `API_INTERNAL_URL=http://backend-service`; readiness check on `/` |
-| `frontend-service.yaml` | Service `frontend-service` (LoadBalancer) | port 80 → container port 3000; AWS creates a public load balancer for it |
+| `frontend-service.yaml` | Service `frontend-service` (LoadBalancer) | port 80 → 3000; AWS creates a public load balancer for it |
 
 Design choices:
 
 - **The database is a StatefulSet, not a Deployment.** A database needs one stable pod with its own disk. Two PostgreSQL replicas without replication would be two separate databases.
-- **The backend and database use ClusterIP.** They are reachable only from inside the cluster.
-- **The frontend uses a LoadBalancer Service.** AWS creates a public load balancer with a stable hostname, so the dashboard is reachable without opening node ports or knowing node IPs.
+- **The database uses ClusterIP.** It is reachable only from inside the cluster.
+- **The frontend and backend use LoadBalancer Services.** AWS creates a public load balancer with a stable hostname for each. The backend has to be public because the create-project form runs in the visitor's browser and calls the API directly.
+- **CORS is restricted to the frontend's address.** `FRONTEND_ORIGIN` lets only the frontend's load balancer call the API from a browser.
 - **Every container has resource requests and limits.** This lets the scheduler place pods correctly and stops one pod from starving the others.
 - **Readiness probes** stop traffic from reaching a pod until it can actually serve requests.
 - **`PGDATA` points to a subfolder** (`/var/lib/postgresql/data/pgdata`). A new EBS disk contains a `lost+found` folder, and PostgreSQL refuses to initialise into a directory that isn't empty.
-- **Passwords live only in the Secret.** They are never in a committed file.
+- **Passwords live only in Secrets.** They are never in a committed file.
 
-### 9.2 Create the EKS cluster
+### 9.3 Create the cluster with Terraform
 
-> **Cost:** EKS charges about $0.10/hour for the control plane, plus about $0.04/hour for each t3.medium node. Delete the cluster when you are done (section 11).
+Push your latest commits first, because Argo CD deploys what is on GitHub, not what is on your laptop:
 
 ```bash
-# Log in to AWS
+git push
+```
+
+Then create the infrastructure (about 15 minutes):
+
+```bash
 aws configure            # or: aws login
+cd terraform
+terraform init
+terraform plan           # review what will be created
+terraform apply          # type: yes
+cd ..
+```
 
-# Create the cluster with two t3.medium worker nodes (about 15–20 minutes)
-eksctl create cluster \
-  --name faraja \
-  --region eu-west-1 \
-  --nodegroup-name faraja-nodes-medium \
-  --node-type t3.medium \
-  --nodes 2 --nodes-min 2 --nodes-max 2 \
-  --managed
+Connect `kubectl` to the new cluster:
 
-# eksctl configures kubectl automatically; check it
-kubectl config current-context
+```bash
+aws eks update-kubeconfig --region us-east-1 --name faraja-cluster
 kubectl get nodes        # both nodes should be Ready
 ```
 
 > **Why t3.medium and not t3.micro?** On EKS, a t3.micro can run only **4 pods**, a limit set by how many IP addresses AWS gives the instance, and it has about 500 MiB of memory. The cluster's own system pods fill all 4 slots, so application pods stay `Pending`. A t3.medium allows 17 pods and has 4 GiB of memory. See section 12.
 
-### 9.3 Install the EBS storage driver
-
-The database's PersistentVolumeClaim asks for an EBS disk (`storageClassName: gp2`). New EKS clusters cannot create EBS disks until the **EBS CSI driver** add-on is installed. The driver needs an IAM role so it is allowed to create volumes.
+### 9.4 Install Argo CD
 
 ```bash
-# 1. Let Kubernetes service accounts use IAM roles (OIDC provider)
-eksctl utils associate-iam-oidc-provider --cluster faraja --region eu-west-1 --approve
-
-# 2. Create the IAM role for the driver
-eksctl create iamserviceaccount --cluster faraja --region eu-west-1 \
-  --namespace kube-system --name ebs-csi-controller-sa \
-  --role-name AmazonEKS_EBS_CSI_DriverRole --role-only \
-  --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
-  --approve
-
-# 3. Install the add-on
-eksctl create addon --cluster faraja --region eu-west-1 --name aws-ebs-csi-driver \
-  --service-account-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/AmazonEKS_EBS_CSI_DriverRole \
-  --force
-
-# Check the driver pods are running
-kubectl get pods -n kube-system | grep ebs-csi
+kubectl create namespace argocd
+kubectl apply -n argocd --server-side \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl wait -n argocd --for=condition=available deployment --all --timeout=300s
 ```
 
-### 9.4 Create the namespace and the Secret
+### 9.5 Create the Secrets
 
-The Secret is created from the command line, so the password never goes into a file in git:
+Secrets are not stored in git, so Argo CD cannot create them. Create them by hand **before** deploying, so the pods find them on first start:
 
 ```bash
-kubectl apply -f kubernetes/namespace.yaml
-
+# Database credentials for the app
+kubectl create namespace faraja
 kubectl create secret generic faraja-secret -n faraja \
   --from-literal=POSTGRES_USER=postgres \
   --from-literal=POSTGRES_PASSWORD='<your-password>' \
   --from-literal=DATABASE_URL='postgresql+psycopg://postgres:<your-password>@database:5432/faraja'
+
+# Grafana admin login
+kubectl create namespace monitoring
+kubectl create secret generic grafana-admin -n monitoring \
+  --from-literal=admin-user=admin \
+  --from-literal=admin-password='<choose-a-password>'
 ```
 
 - Use the **same password** in `POSTGRES_PASSWORD` and inside `DATABASE_URL`.
 - `database` in the URL is the name of the PostgreSQL Service.
 - Alternatively, copy `kubernetes/secret.yaml.example` to `kubernetes/secret.yaml` (git-ignored), fill in the password, and run `kubectl apply -f kubernetes/secret.yaml`.
 
-### 9.5 Deploy everything
+### 9.6 Deploy everything through Argo CD
 
 ```bash
-kubectl apply -f kubernetes/
+kubectl apply -f argocd/
+kubectl get applications -n argocd -w     # wait until all three are Synced / Healthy
 ```
 
-`kubectl` applies every `.yaml` file in the folder. `secret.yaml.example` is ignored because it doesn't end in `.yaml`, so the template can never overwrite the real Secret.
+| Argo CD Application | Source | Deploys into |
+|---|---|---|
+| `faraja` | `kubernetes/` in this repo | `faraja` |
+| `kube-prometheus-stack` | Helm chart `kube-prometheus-stack` 92.16.1 | `monitoring` |
+| `faraja-monitoring` | `monitoring/` in this repo | `monitoring` |
+
+All three use automated sync with `prune` and `selfHeal`: Argo CD removes objects deleted from git and reverts manual changes made with `kubectl`.
 
 Kubernetes then:
 
-1. creates the ConfigMaps, the PVC and the Services;
+1. creates the ConfigMaps, the PVC and the Services; AWS starts creating the two load balancers;
 2. starts `postgres-0`. The PVC triggers the EBS driver to create and attach a 1 Gi disk, and PostgreSQL runs `init.sql` from the `postgres-init` ConfigMap;
-3. starts the backend. Until the database is ready it may restart a few times, then it becomes `1/1 Running`;
+3. starts the 2 backend replicas. Until the database is ready they may restart a few times;
 4. starts the 2 frontend replicas.
 
-Watch the pods start:
+At this point the dashboard opens and lists projects. Saving a project needs one more step.
 
-```bash
-kubectl get pods -n faraja -w
-```
+### 9.7 Connect the browser to the new backend (needed after every new cluster)
+
+The create-project form runs in the browser and calls the backend's load balancer directly. That address is **baked into the frontend image at build time**, and AWS gives the load balancers new hostnames every time the cluster is recreated. So after each new cluster:
+
+1. Get the two new hostnames:
+   ```bash
+   kubectl get svc -n faraja backend-service frontend-service
+   ```
+2. Rebuild and push the frontend with the new **backend** hostname (use a new tag each time):
+   ```bash
+   docker build --build-arg NEXT_PUBLIC_API_BASE_URL=http://<backend-hostname> \
+     -t kenanricky/faraja-frontend:<new-tag> ./frontend
+   docker push kenanricky/faraja-frontend:<new-tag>
+   ```
+3. Update two files:
+   - `kubernetes/frontend-deployment.yaml`: `image: kenanricky/faraja-frontend:<new-tag>`
+   - `kubernetes/configmap.yaml`: `FRONTEND_ORIGIN: http://<frontend-hostname>` (`http`, no trailing slash)
+4. Commit and push. Once Argo CD has synced, restart the backend so it reads the new CORS value:
+   ```bash
+   git commit -am "Point the frontend and CORS at the new load balancers" && git push
+   kubectl rollout restart deployment backend -n faraja
+   ```
+
+To make Argo CD sync immediately instead of waiting up to 3 minutes, click **Refresh** in the Argo CD UI (section 10).
 
 ---
 
-## 10. Verify the Kubernetes deployment
+## 10. Verify the deployment and open the tools
 
 ```bash
+kubectl get applications -n argocd
 kubectl get pods,svc,pvc -n faraja
 ```
 
 Expected:
 
 ```
+faraja                  Synced   Healthy
+faraja-monitoring       Synced   Healthy
+kube-prometheus-stack   Synced   Healthy
+
 pod/postgres-0               1/1  Running
 pod/backend-xxxxx            1/1  Running
+pod/backend-yyyyy            1/1  Running
 pod/frontend-xxxxx           1/1  Running
 pod/frontend-yyyyy           1/1  Running
 
-service/database           ClusterIP  5432/TCP
-service/backend-service    ClusterIP  80/TCP
-service/frontend-service   LoadBalancer   <xxxx>.eu-west-1.elb.amazonaws.com   80:3xxxx/TCP
+service/database           ClusterIP      5432/TCP
+service/backend-service    LoadBalancer   <xxxx>.us-east-1.elb.amazonaws.com   80:3xxxx/TCP
+service/frontend-service   LoadBalancer   <yyyy>.us-east-1.elb.amazonaws.com   80:3xxxx/TCP
 
 persistentvolumeclaim/faraja-pvc   Bound   1Gi   gp2
 ```
 
-Check that the database ran the schema:
+Check that the database ran the schema and the backend is reachable:
 
 ```bash
 kubectl logs postgres-0 -n faraja | grep -E "init.sql|CREATE"
+curl http://<backend-hostname>/health          # {"status":"ok"}
 ```
 
-End-to-end test inside the cluster (create a project, then check the frontend shows it):
+Check that CORS allows the frontend (this is what the browser does before saving a project):
 
 ```bash
-kubectl exec -n faraja deploy/backend -- python -c "
-import urllib.request, json
-d = json.dumps({'name':'K8s test road','description':'cluster test','county':'Nairobi',
-  'budget_allocated':1000,'budget_spent':0,'start_date':'2026-01-01',
-  'target_end_date':'2026-12-31','status':'planned',
-  'implementing_agency':'KeNHA','lead_politician':'N/A'}).encode()
-r = urllib.request.urlopen(urllib.request.Request(
-  'http://localhost:8000/projects', d, {'Content-Type':'application/json'}))
-print('POST', r.status)"
-
-kubectl exec -n faraja deploy/frontend -- wget -qO- http://frontend-service | grep -o "K8s test road"
+curl -s -o /dev/null -D - -X OPTIONS http://<backend-hostname>/projects \
+  -H "Origin: http://<frontend-hostname>" -H "Access-Control-Request-Method: POST" \
+  | grep -i access-control-allow-origin        # must echo the frontend address
 ```
 
-This was tested on EKS: the POST returned `201` and the project appeared on the frontend page.
+### Open the dashboard
 
-### Open the dashboard in a browser
+Open `http://<frontend-hostname>` in a browser and add a project. Use plain **`http://`**: the load balancer only listens on port 80, and a browser that switches to `https://` will time out. A new load balancer takes 2–3 minutes before its DNS name resolves.
+
+### Open Grafana and Argo CD
+
+Neither is public. Reach them with a port-forward, each in its own terminal:
+
+| Tool | Command | Address | Login |
+|---|---|---|---|
+| Grafana | `kubectl port-forward -n monitoring svc/monitoring-grafana 3001:80` | http://localhost:3001 | `admin` / the `grafana-admin` password |
+| Prometheus | `kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 9090:9090` | http://localhost:9090 | none |
+| Argo CD | `kubectl port-forward -n argocd svc/argocd-server 8443:443` | https://localhost:8443 (accept the self-signed certificate) | `admin` / see below |
 
 ```bash
-kubectl get svc frontend-service -n faraja    # copy the EXTERNAL-IP (an ELB hostname)
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 ```
 
-Open `http://<EXTERNAL-IP>` in a browser. The load balancer takes 2–3 minutes to be created and for its DNS name to start resolving; until then `EXTERNAL-IP` shows `<pending>` or the page doesn't load yet.
-
-For a quick check without the load balancer, you can also port-forward:
-
-```bash
-kubectl port-forward -n faraja svc/frontend-service 8080:80   # then open http://localhost:8080
-```
+In Grafana, open **Dashboards → Faraja - Project Tracker Overview**. Metrics and alerts are described in [monitoring/README.md](monitoring/README.md). If a local port is already in use, pick another one (for example `3002:80`).
 
 ### See the resources in the AWS console
 
-Set the console region to **Europe (Ireland) eu-west-1**, then go to **EKS → Clusters → faraja → Resources** and select the `faraja` namespace. The worker nodes are under **EC2 → Instances**, and the database disk under **EC2 → Volumes**.
+Set the console region to **US East (N. Virginia) us-east-1**, then go to **EKS → Clusters → faraja-cluster → Resources** and select the `faraja` namespace. The worker nodes are under **EC2 → Instances**, the load balancers under **EC2 → Load Balancers**, and the database disk under **EC2 → Volumes**.
 
 ### Useful troubleshooting commands
 
@@ -525,6 +606,7 @@ kubectl logs <pod-name> -n faraja            # application logs
 kubectl logs <pod-name> -n faraja --previous # logs from the last crashed container
 kubectl get events -n faraja --sort-by=.lastTimestamp
 kubectl rollout restart deployment/backend -n faraja
+kubectl get application faraja -n argocd -o jsonpath='{.status.sync.revision}'   # commit Argo CD deployed
 ```
 
 ---
@@ -538,21 +620,26 @@ docker compose down        # stop and remove containers and the network (data is
 docker compose down -v     # also delete the database volume (all data is lost)
 ```
 
-### Kubernetes
+### EKS (stops AWS charges)
+
+Tear down in this order. The load balancers and the EBS disk were created by Kubernetes, not Terraform, so they must be removed first or `terraform destroy` gets stuck on them.
 
 ```bash
-kubectl delete -f kubernetes/                    # remove the app
-kubectl delete secret faraja-secret -n faraja
-kubectl delete namespace faraja                  # remove everything left in the namespace
+# 1. Stop Argo CD from recreating anything
+kubectl delete applications -n argocd --all
+
+# 2. Remove the app and monitoring: deletes both load balancers and the EBS disk
+kubectl delete namespace faraja monitoring
+
+# 3. Destroy the cluster, nodes, NAT gateway and VPC (10–15 minutes)
+cd terraform && terraform destroy      # type: yes
+
+# 4. Check nothing is left
+aws eks list-clusters --region us-east-1
+aws elb describe-load-balancers --region us-east-1 --query 'LoadBalancerDescriptions[].LoadBalancerName'
 ```
 
-### Delete the EKS cluster (stops AWS charges)
-
-```bash
-eksctl delete cluster --name faraja --region eu-west-1
-```
-
-Afterwards, check in the AWS console (eu-west-1) that no EC2 instances, EBS volumes or load balancers are left behind. Delete the `faraja` namespace (or `frontend-service`) **before** deleting the cluster, so Kubernetes removes the load balancer it created.
+Tearing down deletes all project data in PostgreSQL. To rebuild later, repeat section 9 from 9.3, including 9.7, because the load balancer addresses will be new.
 
 ---
 
@@ -569,21 +656,31 @@ Afterwards, check in the AWS console (eu-west-1) that no EC2 instances, EBS volu
 | 7 | Dashboard was empty inside containers | Server-side rendering called `localhost:8000`, which inside a container is the frontend itself | `lib/api.ts` uses `API_INTERNAL_URL` (`http://backend:8000` / `http://backend-service`) on the server |
 | 8 | Kubernetes manifests had wrong ports and selectors | The frontend Service selected `app: backend`; the name `frontend-Service` used capitals (invalid); container ports didn't match the apps | Fixed the selectors, names and ports; added resource limits |
 | 9 | `postgres-0` stuck in `Pending`: "Too many pods" | t3.micro nodes allow only 4 pods, all used by system pods | Replaced the node group with t3.medium |
-| 10 | `faraja-pvc` stuck in `Pending` | The EBS CSI driver wasn't installed, so no disk could be created | Installed the `aws-ebs-csi-driver` add-on with an IAM role (section 9.3) |
-| 11 | Backend `CreateContainerConfigError: secret "faraja-secret" not found` | The Secret hadn't been created on the new cluster | Created it with `kubectl create secret` (section 9.4) |
+| 10 | `faraja-pvc` stuck in `Pending` | The EBS CSI driver wasn't installed, so no disk could be created | Installed the `aws-ebs-csi-driver` add-on; Terraform now does this (section 9.1) |
+| 11 | Backend `CreateContainerConfigError: secret "faraja-secret" not found` | The Secret hadn't been created on the new cluster | Created it with `kubectl create secret` (section 9.5) |
 | 12 | Backend `CrashLoopBackOff` | The backend had no `DATABASE_URL`, so it tried `localhost:5432` | Deployment reads `DATABASE_URL` from the Secret |
 | 13 | `kubectl apply` refused the StatefulSet: "updates to statefulset spec … are forbidden" | `serviceName` cannot be changed on an existing StatefulSet | Deleted and recreated the StatefulSet; the data is safe on the separate PVC |
 | 14 | Risk: `kubectl apply -f kubernetes/` would overwrite the real Secret with the template password | The template was named `secret.example.yaml` | Renamed it to `secret.yaml.example` so `kubectl` skips it |
 | 15 | The dashboard couldn't be opened in a browser from outside the cluster | The frontend Service was a `NodePort` (30090). EKS node security groups block that port by default, and the URL depended on a worker node's public IP, which changes when nodes are replaced | Changed `frontend-service` to `type: LoadBalancer`. AWS now creates a public load balancer on port 80 with a stable hostname (`kubectl get svc -n faraja`), with no security-group edits needed |
+| 16 | `terraform validate` failed: "Duplicate variable declaration" | `aws_region` and `cluster_name` were declared in both `main.tf` and `variables.tf` | Kept them only in `variables.tf` |
+| 17 | Cluster creation would be rejected | EKS 1.30 is no longer offered by AWS | Set `cluster_version = "1.34"` |
+| 18 | `kubectl` and Terraform would get `Unauthorized` on the new cluster | Version 20 of the EKS module no longer makes the creator a cluster admin | Added `enable_cluster_creator_admin_permissions = true` |
+| 19 | First `terraform plan` would fail | The Kubernetes and Helm providers read the cluster through data sources before it existed | Removed those providers and the app resources from Terraform; Argo CD deploys the app |
+| 20 | Public load balancers might not be placed | Public subnets were tagged `kubernetes.io/role/public-elb`, which AWS ignores | Changed the tag to `kubernetes.io/role/elb` |
+| 21 | Creating a project from the browser failed on EKS ("Could not save project") | The browser used the backend address baked into the image (`localhost:8000`, later the old cluster's load balancer); the backend was ClusterIP; CORS only allowed `localhost` | Backend Service set to LoadBalancer, frontend rebuilt with the new backend address (`v1.4.0`), `FRONTEND_ORIGIN` added (section 9.7) |
+| 22 | A pushed commit was not deployed straight away | Argo CD polls GitHub every 3 minutes and had checked just before the push | Clicked **Refresh** in Argo CD (or wait); then restarted the backend to load the new ConfigMap |
+| 23 | `kubectl port-forward ... 8080:443` failed: "address already in use" | Jenkins was using port 8080 on the laptop | Used another local port (8443 for Argo CD, 3001 for Grafana) |
 
 ---
 
 ## 13. Known limitations and next steps
 
-- **Creating a project from the browser on Kubernetes.** The frontend image was built with `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`. On the cluster the browser cannot reach that address, so the create-project form fails. Viewing projects works because that request runs on the server. Planned fix: add a proxy route in the frontend so the browser calls `/api/...` and the frontend forwards it to `backend-service`, then publish `v1.2.0`.
+- **The frontend must be rebuilt for every new cluster.** The backend address is baked into the frontend image, and load balancer hostnames change each time the cluster is recreated (section 9.7). Planned fix: send the form through the Next.js server (a Server Action or an `/api` proxy route) so the browser only talks to the frontend, the backend can go back to ClusterIP, and no rebuild or CORS change is needed.
+- **No HTTPS.** Both load balancers serve plain HTTP on port 80.
+- **The backend API is public.** Anyone with its address can call it; CORS only limits browsers.
 - **Single database replica.** PostgreSQL runs as one pod. High availability would need replication, for example a PostgreSQL operator or Amazon RDS.
+- **Secrets are created by hand.** A tool such as External Secrets Operator or Sealed Secrets would let Argo CD manage them too.
 - **Planned Kubernetes work:**
-  - Prometheus and Grafana monitoring
   - Bash scripts to automate deployments and cluster health checks
   - Liveness probes
   - An Ingress (AWS Load Balancer Controller) with HTTPS and a custom domain
