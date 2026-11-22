@@ -11,6 +11,20 @@ data:
         "to": "now"
       },
       "refresh": "10s",
+      "annotations": {
+        "list": [
+          {
+            "name": "Firing alerts",
+            "enable": true,
+            "iconColor": "red",
+            "expr": "ALERTS{alertstate=\"firing\", alertname!=\"Watchdog\"}",
+            "step": "60s",
+            "titleFormat": "{{alertname}}",
+            "textFormat": "{{severity}}: {{namespace}}",
+            "tagKeys": "severity,namespace"
+          }
+        ]
+      },
       "templating": {
         "list": [
           {
@@ -28,7 +42,7 @@ data:
       "panels": [
         {
           "type": "row",
-          "title": "Application Health",
+          "title": "Alerts",
           "gridPos": {
             "x": 0,
             "y": 0,
@@ -38,10 +52,102 @@ data:
         },
         {
           "type": "stat",
-          "title": "Healthy API replicas",
+          "title": "Firing alerts",
+          "description": "Alerts currently firing in Prometheus (Watchdog excluded).",
           "gridPos": {
             "x": 0,
             "y": 1,
+            "w": 6,
+            "h": 6
+          },
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "expr": "count(ALERTS{alertstate=\"firing\", alertname!=\"Watchdog\"}) or vector(0)",
+              "instant": true,
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Active alerts",
+          "description": "Pending and firing alerts from the PrometheusRules in this repo.",
+          "gridPos": {
+            "x": 6,
+            "y": 1,
+            "w": 18,
+            "h": 6
+          },
+          "targets": [
+            {
+              "expr": "ALERTS{alertname!=\"Watchdog\"}",
+              "format": "table",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Value": true,
+                  "__name__": true
+                },
+                "indexByName": {
+                  "alertname": 0,
+                  "severity": 1,
+                  "alertstate": 2,
+                  "namespace": 3
+                },
+                "renameByName": {
+                  "alertname": "Alert",
+                  "severity": "Severity",
+                  "alertstate": "State",
+                  "namespace": "Namespace"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "title": "Application Health",
+          "gridPos": {
+            "x": 0,
+            "y": 7,
+            "w": 24,
+            "h": 1
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Healthy API replicas",
+          "gridPos": {
+            "x": 0,
+            "y": 8,
             "w": 8,
             "h": 4
           },
@@ -63,7 +169,7 @@ data:
           "title": "Request rate",
           "gridPos": {
             "x": 8,
-            "y": 1,
+            "y": 8,
             "w": 8,
             "h": 4
           },
@@ -85,7 +191,7 @@ data:
           "title": "Error rate",
           "gridPos": {
             "x": 16,
-            "y": 1,
+            "y": 8,
             "w": 8,
             "h": 4
           },
@@ -107,7 +213,7 @@ data:
           "title": "Performance",
           "gridPos": {
             "x": 0,
-            "y": 5,
+            "y": 12,
             "w": 24,
             "h": 1
           }
@@ -117,7 +223,7 @@ data:
           "title": "Request rate by route and status",
           "gridPos": {
             "x": 0,
-            "y": 6,
+            "y": 13,
             "w": 12,
             "h": 8
           },
@@ -139,7 +245,7 @@ data:
           "title": "Latency P50 / P95 / P99",
           "gridPos": {
             "x": 12,
-            "y": 6,
+            "y": 13,
             "w": 12,
             "h": 8
           },
@@ -171,7 +277,7 @@ data:
           "title": "Business",
           "gridPos": {
             "x": 0,
-            "y": 14,
+            "y": 21,
             "w": 24,
             "h": 1
           }
@@ -181,7 +287,7 @@ data:
           "title": "Projects",
           "gridPos": {
             "x": 0,
-            "y": 15,
+            "y": 22,
             "w": 12,
             "h": 4
           },
@@ -203,7 +309,7 @@ data:
           "title": "Milestones",
           "gridPos": {
             "x": 12,
-            "y": 15,
+            "y": 22,
             "w": 12,
             "h": 4
           },
@@ -225,7 +331,7 @@ data:
           "title": "Resources",
           "gridPos": {
             "x": 0,
-            "y": 19,
+            "y": 26,
             "w": 24,
             "h": 1
           }
@@ -235,7 +341,7 @@ data:
           "title": "Memory per pod",
           "gridPos": {
             "x": 0,
-            "y": 20,
+            "y": 27,
             "w": 12,
             "h": 8
           },
@@ -257,7 +363,7 @@ data:
           "title": "CPU per pod",
           "gridPos": {
             "x": 12,
-            "y": 20,
+            "y": 27,
             "w": 12,
             "h": 8
           },
