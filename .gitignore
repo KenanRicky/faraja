@@ -27,3 +27,7 @@ awscliv2.zip
 kubernetes/secret.yaml
 
 secret.yaml.example
+
+# Local generated secrets and Terraform plan files
+*.local
+tfplan

@@ -631,15 +631,55 @@ kubectl delete applications -n argocd --all
 # 2. Remove the app and monitoring: deletes both load balancers and the EBS disk
 kubectl delete namespace faraja monitoring
 
-# 3. Destroy the cluster, nodes, NAT gateway and VPC (10–15 minutes)
-cd terraform && terraform destroy      # type: yes
+# 3. Wait until AWS has actually removed them (both commands must print nothing)
+aws elb describe-load-balancers --region us-east-1 --query 'LoadBalancerDescriptions[].LoadBalancerName' --output text
+aws ec2 describe-volumes --region us-east-1 \
+  --filters Name=tag:kubernetes.io/cluster/faraja-cluster,Values=owned --query 'Volumes[].VolumeId' --output text
 
-# 4. Check nothing is left
-aws eks list-clusters --region us-east-1
-aws elb describe-load-balancers --region us-east-1 --query 'LoadBalancerDescriptions[].LoadBalancerName'
+# 4. Destroy the cluster, nodes, NAT gateway and VPC (10–15 minutes)
+cd terraform && terraform destroy      # type: yes
+cd ..
+
+# 5. Check nothing is left (every command should print nothing)
+aws eks list-clusters --region us-east-1 --query clusters --output text
+aws ec2 describe-nat-gateways --region us-east-1 --filter Name=state,Values=pending,available --query 'NatGateways[].NatGatewayId' --output text
+aws ec2 describe-addresses --region us-east-1 --query 'Addresses[].PublicIp' --output text
+aws ec2 describe-vpcs --region us-east-1 --filters Name=tag:Name,Values=faraja-vpc --query 'Vpcs[].VpcId' --output text
 ```
 
 Tearing down deletes all project data in PostgreSQL. To rebuild later, repeat section 9 from 9.3, including 9.7, because the load balancer addresses will be new.
+
+Don't stop `terraform apply` or `terraform destroy` halfway. If you must, press Ctrl+C once and let Terraform save its state; a hard kill can leave resources running that Terraform no longer knows about. A cluster that is still being created cannot be deleted, so `terraform destroy` will fail until it reaches `ACTIVE` (`aws eks wait cluster-active --name faraja-cluster --region us-east-1`).
+
+#### If you ran `terraform destroy` first
+
+Without steps 1–3, the cluster is deleted but Kubernetes never gets the chance to remove what it created. Two load balancers, their security groups and the PostgreSQL disk are left behind. They keep costing money, and `terraform destroy` fails with `DependencyViolation` because the load balancers are still inside the VPC. Clean them up by hand, then run Terraform again:
+
+```bash
+R=us-east-1
+VPC=$(aws ec2 describe-vpcs --region $R --filters Name=tag:Name,Values=faraja-vpc --query 'Vpcs[0].VpcId' --output text)
+
+# Load balancers that Kubernetes created for this VPC (check the names before deleting)
+aws elb describe-load-balancers --region $R \
+  --query "LoadBalancerDescriptions[?VPCId=='$VPC'].LoadBalancerName" --output text
+aws elb delete-load-balancer --region $R --load-balancer-name <name>      # once per load balancer
+
+# Their security groups, named k8s-elb-<load-balancer-name>
+# (wait a minute after deleting the load balancers, or AWS reports them as still in use)
+aws ec2 describe-security-groups --region $R --filters Name=vpc-id,Values=$VPC \
+  --query "SecurityGroups[?starts_with(GroupName, 'k8s-elb-')].GroupId" --output text
+aws ec2 delete-security-group --region $R --group-id <sg-id>              # once per group
+
+# The PostgreSQL disk (all project data on it is lost)
+aws ec2 describe-volumes --region $R \
+  --filters Name=tag:kubernetes.io/cluster/faraja-cluster,Values=owned --query 'Volumes[].VolumeId' --output text
+aws ec2 delete-volume --region $R --volume-id <vol-id>
+
+# Then remove what Terraform still tracks (the VPC, subnets and internet gateway)
+cd terraform && terraform destroy
+```
+
+Afterwards, run the checks from step 5. The only VPC left in us-east-1 should be AWS's default one, which is free and not part of this project.
 
 ---
 
